@@ -1,0 +1,44 @@
+---
+title: Expected lifetime
+author: useR member
+output:
+    pdf_document
+---
+
+
+```{r makeupdata}
+set.seed(53)
+x <- rep(c(1, 2, 3), c(37, 44, 21))
+n <- length(x)
+mu <- ifelse(x == 1, 18, ifelse(x == 2, 26, 22))
+y <- rexp(n, 1 / mu)
+L <- round(runif(n, 10, 50))
+cens <- y > L
+yobs <- y[!cens]
+xobs <- x[!cens]
+ycens <- L[cens]
+xcens <- x[cens]
+```
+
+
+A collection of `r n1` cutthroat trout, `r n2` rainbow trout, and `r n3`
+grayling were exposed to a toxic biological agent over the course of a 50 day
+study with objective to determine the typical length of survival for these
+species of fish after being exposed to the agent.  However, some fish survived
+the entire duration of the study and, to complicate matters, each fish was
+exposed at a different time during the study.
+
+For fish that died, the length of time until death from exposure is recorded.
+For fish that did not die during the study, the length of time from exposure to
+completion of the study (i.e. last known time alive) was recorded.  Time
+measurements are given in hours.
+
+The researchers would like to estimate the average time until death for each
+species and also in contrasting the average time until death of the cutthroat
+and rainbow trouts.
+
+
+
+
+
+
