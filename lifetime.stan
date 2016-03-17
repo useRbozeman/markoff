@@ -22,6 +22,8 @@ parameters {
 
 model {
     mu1 ~ normal(20, 10);
+    mu2 ~ normal(20, 10);
+    mu3 ~ normal(20, 10);
     sigma ~ normal(0, 10);
     y1obs ~ normal(mu1, sigma);
     y2obs ~ normal(mu2, sigma);
@@ -32,4 +34,7 @@ model {
 }
 
 generated quantities {
+    real cut_rain;
+
+    cut_rain <- mu1 - mu2;
 }

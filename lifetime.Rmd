@@ -6,26 +6,18 @@ output:
 ---
 
 
-```{r makeupdata}
-set.seed(53)
-x <- rep(c(1, 2, 3), c(37, 44, 21))
-n <- length(x)
-mu <- ifelse(x == 1, 18, ifelse(x == 2, 26, 15))
-alpha <- 4
-y <- rgamma(n, alpha, scale = mu / alpha)
-L <- round(runif(n, 10, 50))
-cens <- y > L
-yobs <- y[!cens]
-xobs <- x[!cens]
-ycens <- L[cens]
-xcens <- x[cens]
-write.table(cbind(xobs, yobs), file = "observed.csv", row.names = FALSE, col.names = FALSE, sep = ",")
-write.table(cbind(xcens, ycens), file = "censored.csv", row.names = FALSE, col.names = FALSE, sep = ",")
-```
-
-```{r loaddata}
+```{r loaddata, echo = FALSE}
+set.seed(22)
+# Read in data
+# Each file has two columns.
+# First column is species ID 1 == cutthroat, 2 == rainbow, 3 == grayling
+# Second column is survival time in days since exposure.
+# In obs.csv, survival time is time until death
+# In cens.csv, survival time is time until end of experiment, or in otherwords,
+# last known time alive
 obs.data <- read.csv("./observed.csv", head = FALSE, col.names = c("species", "time"))
 cens.data <- read.csv("./censored.csv", head = FALSE, col.names = c("species", "time"))
+
 n1obs <- sum(obs.data$species == 1)
 n2obs <- sum(obs.data$species == 2)
 n3obs <- sum(obs.data$species == 3)
@@ -37,12 +29,16 @@ n2 <- n2obs + n2cens
 n3 <- n3obs + n3cens
 ```
 
+Intro
+=====
+
 A collection of `r n1` cutthroat trout, `r n2` rainbow trout, and `r n3`
 grayling were exposed to a toxic biological agent over the course of a 50 day
 study with objective to determine the typical length of survival for these
 species of fish after being exposed to the agent.  However, some fish survived
 the entire duration of the study and, to complicate matters, each fish was
-exposed at a different time during the study.
+exposed at a different time during the study.  So, we have a tricky censored
+data problem.
 
 For fish that died, the length of time until death from exposure is recorded.
 For fish that did not die during the study, the length of time from exposure to
@@ -53,13 +49,57 @@ The researchers would like to estimate the average time until death for each
 species and also in contrasting the average time until death of the cutthroat
 and rainbow trouts.
 
-```{r eda}
+Data
+====
+
+First, we take a look at the time until death for the fish that did die during
+the study.  The boxplots below give the time until death by species.
+
+```{r boxplots, fig.keep = "last", echo = FALSE}
 boxplot(obs.data$time ~ obs.data$species, xaxt = "n")
 axis(1, at = c(1, 2, 3), label = c("cutthroat", "rainbow", "grayling"))
-points(cens.data$time ~ jitter(cens.data$species))
 ```
 
-```{r prepareforstan}
+We must be careful of looking too closely at the boxplot.  Trying to make
+inference from the boxplot and the observed data alone might cause us to
+underestimate the average lifetime.  Below is a plot that marks known time
+until death with an "x" and last known time alive with a "o" followed by a
+dashed line to indicate that death happens at some point beyond the mark.
+However, I suspect there are better ways to visualize this information.
+
+
+```{r obs_and_censored, fig.keep = "last", echo = FALSE}
+plot(0, 0, type = 'n', xlim = c(0, 4), ylim = c(0, 50), xaxt = 'n', xlab = '', ylab = '')
+axis(1, at = c(1, 2, 3), label = c("cutthroat", "rainbow", "grayling"))
+points(obs.data$time ~ jitter(obs.data$species), pch = 4)
+cens.x <- jitter(cens.data$species)
+points(cens.data$time ~ cens.x, pch = 1, cex = 2)
+for (i in 1:nrow(cens.data))
+{
+    lines(c(cens.x[i], cens.x[i]), c(cens.data$time[i], 100), lty = 3, lwd = 1)
+}
+```
+
+Fit model
+=========
+
+Now that we've played around with the dataset a little bit, we are going to fit
+a Bayesian model that takes into account both the observed times until death as
+well as the last known time alive.  We are using Rstan and the model code is in
+the file `lifetime.stan`.  The simple model assumes that the likelihood that
+fish $i$ of species $j[i]$ perishes after $y$ time is $y_i \sim
+N(\mu_{j[i]}, \sigma^2)$.  To spell it out, we assume that there is a mean time
+until death for each species, but all species share the same variability of
+time until death for individual observations.  (The model is fairly simple and
+you are welcome to investigate and tweak.  In a future R meetup we will figure
+out exactly what is going on with the code and maybe adjust the model to
+something more realistic.)
+
+So, we have four parameters of interest, the mean time until death for each
+species ($\mu_1$, $\mu_2$, and $\mu_3$) and the common standard deviation
+($\sigma$) of time until death.
+
+```{r prepareforstan, echo = FALSE}
 stan.data <- list(n1obs, n2obs, n3obs, n1cens, n2cens, n3cens,
                   y1obs = obs.data$time[obs.data$species == 1],
                   y2obs = obs.data$time[obs.data$species == 2],
@@ -69,15 +109,54 @@ stan.data <- list(n1obs, n2obs, n3obs, n1cens, n2cens, n3cens,
                   y3cens = cens.data$time[cens.data$species == 3])
 ```
 
-```{r sample}
+```{r sample, echo = FALSE, results = "hide", warning = FALSE, message = FALSE}
 library(rstan)
-out <- stan(file = "./censored.stan", data = stan.data, chains = 1, iter = 4000)
+samps <- stan(file = "./lifetime.stan", data = stan.data, chains = 4, iter = 4000)
+
+# OR just load the data
+# load("./lifetime.RData")
 ```
 
+Evaluate sampler
+================
+
+Before making inference on the model fit, we should investigate to make sure it
+seems like the sampler has converged.  First let's take a look at traceplots
+for each variable to make sure our 4 chains are mixing.
+
+```{r traceplot, echo = FALSE}
+plot(samps, plotfun = "trace", pars = c("mu1", "mu2", "mu3", "sigma"))
+```
+
+Looks reasonable.  And the summary of our sampler suggests that $\hat{R}$ is
+essentially 1.
+
+```{r summary, echo = FALSE, results = "markup"}
+samps
+```
+
+Results
+=======
+
+Below is a histogram of the posterior of $\mu_1$, the average lifetime for
+cutthroat.  The posterior mean and a 95\% credible interval are marked.
 
 
+```{r mu1, echo = FALSE, fig.keep = "last"}
+mu1 <- extract(samps, pars = "mu1")$mu1
+hist(mu1)
+abline(v = mean(mu1), lwd = 4)
+abline(v = quantile(mu1, c(0.025, 0.975)), lwd = 2)
+```
 
+Below is a histogram for the difference in mean time until death between
+cutthroat and rainbow.
 
+```{r mu1_minus_mu2, echo = FALSE, fig.keep = "last"}
+mu1mu2 <- extract(samps, pars = "cut_rain")$cut_rain
+hist(mu1mu2)
+abline(v = mean(mu1mu2), lwd = 4)
+abline(v = quantile(mu1mu2, c(0.025, 0.975)), lwd = 2)
+```
 
-
-
+(I've gone pretty light on the results here.  Maybe others can spruce this up!)
