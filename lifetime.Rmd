@@ -10,16 +10,32 @@ output:
 set.seed(53)
 x <- rep(c(1, 2, 3), c(37, 44, 21))
 n <- length(x)
-mu <- ifelse(x == 1, 18, ifelse(x == 2, 26, 22))
-y <- rexp(n, 1 / mu)
+mu <- ifelse(x == 1, 18, ifelse(x == 2, 26, 15))
+alpha <- 4
+y <- rgamma(n, alpha, scale = mu / alpha)
 L <- round(runif(n, 10, 50))
 cens <- y > L
 yobs <- y[!cens]
 xobs <- x[!cens]
 ycens <- L[cens]
 xcens <- x[cens]
+write.table(cbind(xobs, yobs), file = "observed.csv", row.names = FALSE, col.names = FALSE, sep = ",")
+write.table(cbind(xcens, ycens), file = "censored.csv", row.names = FALSE, col.names = FALSE, sep = ",")
 ```
 
+```{r loaddata}
+obs.data <- read.csv("./observed.csv", head = FALSE, col.names = c("species", "time"))
+cens.data <- read.csv("./censored.csv", head = FALSE, col.names = c("species", "time"))
+n1obs <- sum(obs.data$species == 1)
+n2obs <- sum(obs.data$species == 2)
+n3obs <- sum(obs.data$species == 3)
+n1cens <- sum(cens.data$species == 1)
+n2cens <- sum(cens.data$species == 2)
+n3cens <- sum(cens.data$species == 3)
+n1 <- n1obs + n1cens
+n2 <- n2obs + n2cens
+n3 <- n3obs + n3cens
+```
 
 A collection of `r n1` cutthroat trout, `r n2` rainbow trout, and `r n3`
 grayling were exposed to a toxic biological agent over the course of a 50 day
@@ -36,6 +52,29 @@ measurements are given in hours.
 The researchers would like to estimate the average time until death for each
 species and also in contrasting the average time until death of the cutthroat
 and rainbow trouts.
+
+```{r eda}
+boxplot(obs.data$time ~ obs.data$species, xaxt = "n")
+axis(1, at = c(1, 2, 3), label = c("cutthroat", "rainbow", "grayling"))
+points(cens.data$time ~ jitter(cens.data$species))
+```
+
+```{r prepareforstan}
+stan.data <- list(n1obs, n2obs, n3obs, n1cens, n2cens, n3cens,
+                  y1obs = obs.data$time[obs.data$species == 1],
+                  y2obs = obs.data$time[obs.data$species == 2],
+                  y3obs = obs.data$time[obs.data$species == 3],
+                  y1cens = cens.data$time[cens.data$species == 1],
+                  y2cens = cens.data$time[cens.data$species == 2],
+                  y3cens = cens.data$time[cens.data$species == 3])
+```
+
+```{r sample}
+library(rstan)
+out <- stan(file = "./censored.stan", data = stan.data, chains = 1, iter = 4000)
+```
+
+
 
 
 
