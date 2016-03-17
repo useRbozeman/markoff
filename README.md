@@ -3,7 +3,7 @@ Welcome to the first ever Bozeman useR markoff!
 We have a very interesting study here of survival times after exposure to a
 deadly biological agent for a few species of fish.  However, to complicate
 matters, the survival times are censored.  For some of the fish, we only know
-that the lived until at least a certain time.  We are interested in figuring
+that they lived until at least a certain time.  We are interested in figuring
 out the average survival time, and luckily, it's pretty easy to do this with
 Bayesian statistics.  In particular we'll use Rstan to fit the model.
 
