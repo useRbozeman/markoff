@@ -1,0 +1,252 @@
+---
+title: Expected lifetime
+author: useR member
+output:
+    revealjs::revealjs_presentation:
+        center: true
+---
+
+
+```{r loaddata, echo = FALSE}
+set.seed(22)
+# Read in data
+# Each file has two columns.
+# First column is species ID 1 == cutthroat, 2 == rainbow, 3 == grayling
+# Second column is survival time in days since exposure.
+# In obs.csv, survival time is time until death
+# In cens.csv, survival time is time until end of experiment, or in otherwords,
+# last known time alive
+obs.data <- read.csv("./observed.csv", head = FALSE, col.names = c("species", "time"))
+cens.data <- read.csv("./censored.csv", head = FALSE, col.names = c("species", "time"))
+
+n1obs <- sum(obs.data$species == 1)
+n2obs <- sum(obs.data$species == 2)
+n3obs <- sum(obs.data$species == 3)
+n1cens <- sum(cens.data$species == 1)
+n2cens <- sum(cens.data$species == 2)
+n3cens <- sum(cens.data$species == 3)
+n1 <- n1obs + n1cens
+n2 <- n2obs + n2cens
+n3 <- n3obs + n3cens
+count.data <- data.frame(species = c("cutthroat", "rainbow", "grayling"),
+                         observed = c(n1obs, n2obs, n3obs),
+                         censored = c(n1cens, n2cens, n3cens),
+                         total = c(n1, n2, n3))
+```
+
+Setup
+=====
+
+How to use revealjs
+-------------------
+
+- First, install the revealjs package `install.packages("revealjs")`
+- Now set the output in your yaml:
+
+```
+---
+title: my title
+author: my name
+output:
+    revealjs::revealjs_presentation
+---
+```
+
+Build
+-----
+
+- Now build like normal!
+- Click rstudio button or use `rmarkdown::render("file.Rmd")`
+- See github readme for options:
+
+[rstudio/revealjs](http://github.com/rstudio/revealjs)
+
+Intro
+=====
+
+The study
+---------
+
+- Three species of fish, cutthroat, rainbow, and grayling exposed to biological
+  agent.
+- Time until death after exposure is recorded.
+- Some observations are censored; we have last known time alive.
+
+Objective
+---------
+
+- Estimate average time until death after exposure for each species.
+- Difference in average time until death between cutthroat and rainbow.
+
+Data
+====
+
+Number of fish
+--------------
+
+```{r number, echo = FALSE}
+library(rbokeh)
+ly_bar(figure(), species, total, data = count.data,
+       hover = c(observed, censored))
+```
+
+Time until death
+----------------
+
+```{r timeuntildeath, echo = FALSE}
+plot(0, 0, type = 'n', xlim = c(0, 4), ylim = c(0, 50), xaxt = 'n', xlab = '', ylab = '')
+axis(1, at = c(1, 2, 3), label = c("cutthroat", "rainbow", "grayling"))
+points(obs.data$time ~ jitter(obs.data$species), pch = 4)
+cens.x <- jitter(cens.data$species)
+points(cens.data$time ~ cens.x, pch = 1, cex = 2)
+for (i in 1:nrow(cens.data))
+{
+    lines(c(cens.x[i], cens.x[i]), c(cens.data$time[i], 100), lty = 3, lwd = 1)
+}
+```
+
+Model
+=====
+
+Parameters and variables
+------------------------
+
+- $\mu_j$ is the average lifetime of species $j$.
+- $\sigma$ is the assumed constant across species standard deviation of
+  lifetime.
+- $y_i$ is the lifetime of the $i^\text{th}$ fish.
+- $j[i]$ is the species of the $i^\text{th}$ fish.
+
+Likelihood
+----------
+
+I assume lifetime follows a normal distribution.
+
+$y_i \sim N(\mu_{j[i]}, \sigma^2)$
+
+
+Prior
+-----
+
+$\mu_j \sim N(20, 10)$
+
+$\sigma \sim N(0, 10)I_{\sigma>\infty}$
+
+($\sigma$ is constrained to be positive)
+
+Censored?
+---------
+
+- Likelihood tells us how we get our data from the parameters.
+- We have $y\sim N(\mu, \sigma^2)$ and we want the probability of $y>C$.
+- So, the likelihood contribution is the part of $N(\mu, \sigma^2)$ greater than $C$.
+
+```{r chunkname, fig.keep = "last", fig.width = 3, fig.height = 3, echo = FALSE}
+curve(dnorm(x, 30, 5), xlim = c(0, 50))
+abline(v = 36)
+```
+
+Stan code
+---------
+
+```{r results = "asis", echo = FALSE}
+cat("\`\`\`c++\n")
+cat(readLines("./lifetime.stan"), sep = "\n")
+cat("\`\`\`")
+```
+
+Fit model and evaluate
+======================
+
+```{r prepareforstan, echo = FALSE}
+stan.data <- list(n1obs, n2obs, n3obs, n1cens, n2cens, n3cens,
+                  y1obs = obs.data$time[obs.data$species == 1],
+                  y2obs = obs.data$time[obs.data$species == 2],
+                  y3obs = obs.data$time[obs.data$species == 3],
+                  y1cens = cens.data$time[cens.data$species == 1],
+                  y2cens = cens.data$time[cens.data$species == 2],
+                  y3cens = cens.data$time[cens.data$species == 3])
+```
+
+```{r sample, echo = FALSE, results = "hide", warning = FALSE, message = FALSE}
+library(rstan)
+# samps <- stan(file = "./lifetime.stan", data = stan.data, chains = 4, iter = 4000)
+
+# OR just load the data
+load("./lifetime.RData")
+```
+
+Traceplot
+---------
+
+```{r traceplot, echo = FALSE}
+plot(samps, plotfun = "trace", pars = c("mu1", "mu2", "mu3", "sigma"))
+```
+
+Summary
+-------
+
+```{r summary, echo = FALSE, results = "markup"}
+library(pander)
+pander(summary(samps)$summary[1:5, c(1, 3, 4, 6, 8)])
+```
+
+Results
+=======
+
+Average lifetime for cutthroat
+------------------------------
+
+
+```{r mu1hist, echo = FALSE}
+library(htmltools)
+library(htmlwidgets)
+library(metricsgraphics)
+library(RColorBrewer)
+
+mu1 <- extract(samps, pars = "mu1")$mu1
+mu2 <- extract(samps, pars = "mu2")$mu2
+
+mjs_plot(as.numeric(mu1), width = 500, height = 500) %>%
+mjs_histogram() %>%
+mjs_labs(x_label = "Mean lifetime of cutthroat")
+
+# mjs_add_marker(quantile(mu1, 0.025), "0.025 Quantile")
+# mjs_add_marker(x_value = quantile(mu1, 0.975), label = "0.975 Quantile") %>%
+# mjs_add_marker(x_value = mean(mu1), label = "mean") %>%
+```
+
+---
+
+
+```{r mu1, echo = FALSE, fig.keep = "last"}
+mu1 <- extract(samps, pars = "mu1")$mu1
+hist(mu1)
+abline(v = mean(mu1), lwd = 4)
+abline(v = quantile(mu1, c(0.025, 0.975)), lwd = 2)
+```
+
+Difference in average lifetime between cutthroat and rainbow
+------------------------------------------------------------
+
+```{r diff, echo = FALSE}
+
+mu1mu2 <- extract(samps, pars = "cut_rain")$cut_rain
+mjs_plot(as.numeric(mu1mu2), width = 500, height = 500) %>%
+mjs_histogram() %>%
+mjs_labs(x_label = "Diff Mean lifetime")
+
+# mjs_add_marker(quantile(mu1, 0.025), "0.025 Quantile")
+# mjs_add_marker(x_value = quantile(mu1, 0.975), label = "0.975 Quantile") %>%
+# mjs_add_marker(x_value = mean(mu1), label = "mean") %>%
+```
+
+---
+
+```{r mu1_minus_mu2, echo = FALSE, fig.keep = "last"}
+mu1mu2 <- extract(samps, pars = "cut_rain")$cut_rain
+hist(mu1mu2)
+abline(v = mean(mu1mu2), lwd = 4)
+abline(v = quantile(mu1mu2, c(0.025, 0.975)), lwd = 2)
+```
+
